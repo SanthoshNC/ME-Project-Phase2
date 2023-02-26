@@ -4,6 +4,7 @@ on:
   push:
    branches:
     - main
+    - feat/branch-1
 
 jobs:
   infra-provisioning-terraform:
@@ -83,7 +84,7 @@ jobs:
               repo: context.repo.repo,
               body: output
             })
-            
+
       - name: Terraform Plan Status
         if: steps.plan.outcome == 'failure'
         run: exit 1
