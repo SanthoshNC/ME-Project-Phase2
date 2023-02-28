@@ -1,10 +1,8 @@
 name: Infrastructure Automation Pipeline
 
 on:
-  push:
-   branches:
-    - main
-    - feat/branch-1
+  workflow_dispatch:
+
 
 jobs:
   infra-provisioning-terraform:
