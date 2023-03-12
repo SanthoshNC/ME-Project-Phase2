@@ -85,5 +85,4 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Run TFLint
-        run: tflint -f compact
-        continue-on-error: false
+        run: tflint -f compact --force
