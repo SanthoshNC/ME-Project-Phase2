@@ -11,8 +11,6 @@ jobs:
     defaults:
       run:
         working-directory: tf
-    permissions:
-      pull-requests: write
     
     steps:
       - name: Checkout Repository
@@ -57,8 +55,6 @@ jobs:
     defaults:
       run:
         working-directory: tf
-    permissions:
-      pull-requests: write
       
     steps:
       - name: Checkout Repository
