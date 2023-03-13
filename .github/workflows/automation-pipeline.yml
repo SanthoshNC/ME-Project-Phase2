@@ -148,3 +148,4 @@ jobs:
           version: 0.38.2        
         env:
           DCTL_FROM: tfstate+s3://santhoshnc-terraform-tfstate-me/terraform.tfstate
+          DCTL_QUIET: true
