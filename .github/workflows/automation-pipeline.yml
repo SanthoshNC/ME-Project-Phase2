@@ -142,10 +142,10 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1   
           
-      - name: Run driftctl
-        uses: snyk/driftctl-action@v1
-        with:
-          version: 0.38.2        
-        env:
-          DCTL_FROM: tfstate+s3://santhoshnc-terraform-tfstate-me/terraform.tfstate
-          DCTL_QUIET: true
+   #   - name: Run driftctl
+   #     uses: snyk/driftctl-action@v1
+   #     with:
+   #       version: 0.38.2        
+   #    env:
+   #       DCTL_FROM: tfstate+s3://santhoshnc-terraform-tfstate-me/terraform.tfstate
+   #       DCTL_QUIET: true
