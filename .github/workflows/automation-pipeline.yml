@@ -5,14 +5,12 @@ on:
 
 
 jobs:
-  infra-provisioning-terraform:
+  initial-setup:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     defaults:
       run:
         working-directory: tf
-    permissions:
-      pull-requests: write
     
     steps:
       - name: Checkout Repository
@@ -45,44 +43,139 @@ jobs:
         id: plan
         run: terraform plan -no-color
         continue-on-error: true    
-
-      - uses: actions/github-script@v6
-        if: github.event_name == 'pull_request'
-        env:
-          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
-            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
-            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
-            <details><summary>Validation Output</summary>
-
-            \`\`\`\n
-            ${{ steps.validate.outputs.stdout }}
-            \`\`\`
-
-            </details>
-
-            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
-
-            <details><summary>Show Plan</summary>
-
-            \`\`\`\n
-            ${process.env.PLAN}
-            \`\`\`
-
-            </details>
-
-            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Working Directory: tf, Workflow: \`${{ github.workflow }}\`*`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            })
-
+        
       - name: Terraform Plan Status
         if: steps.plan.outcome == 'failure'
         run: exit 1
+        
+  static-code-analysis-tflint:
+    runs-on: ubuntu-latest
+    needs: initial-setup
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: tf
+      
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3 
+      
+      - uses: actions/cache@v3
+        name: Cache plugin dir
+        with:
+          path: ~/.tflint.d/plugins
+          key: ${{ matrix.os }}-tflint-${{ hashFiles('.tflint.hcl') }}
+
+      - uses: terraform-linters/setup-tflint@v3
+        name: Setup TFLint
+        with:
+          tflint_version: v0.44.1
+
+      - name: Show version
+        run: tflint --version
+
+      - name: Init TFLint
+        run: tflint --init
+        env:
+          # https://github.com/terraform-linters/tflint/blob/master/docs/user-guide/plugins.md#avoiding-rate-limiting
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Run TFLint
+        run: tflint -f compact --force
+        
+  static-code-analysis-checkov:
+    permissions:
+      contents: read # for actions/checkout to fetch code
+      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
+      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
+      
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    needs: initial-setup
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: tf
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so follow-up steps can access it
+      - uses: actions/checkout@v3
+
+      - name: Checkov GitHub Action
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          # This will add both a CLI output to the console and create a results.sarif file
+          output_format: cli,sarif
+          output_file_path: console,results.sarif
+          soft_fail: true
+          framework: terraform
+        
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v2
+        
+        # Results are generated only on a success or failure
+        # this is required since GitHub by default won't run the next step
+        # when the previous one has failed. Security checks that do not pass will 'fail'.
+        # An alternative is to add `continue-on-error: true` to the previous step
+        # Or 'soft_fail: true' to checkov.
+        if: success() || failure()
+        with:
+          sarif_file: results.sarif
+
+  drift-detection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: [static-code-analysis-tflint,static-code-analysis-checkov]
+    defaults:
+      run:
+        working-directory: tf
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        
+      - name: Configure AWS Credentials Action For GitHub Actions
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1   
+          
+   #   - name: Run driftctl
+   #     uses: snyk/driftctl-action@v1
+   #     with:
+   #       version: 0.38.2        
+   #    env:
+   #       DCTL_FROM: tfstate+s3://santhoshnc-terraform-tfstate-me/terraform.tfstate
+   #       DCTL_QUIET: true
+
+  infracost:
+    name: Infracost
+    runs-on: ubuntu-latest
+    needs: drift-detection
+    permissions:
+      contents: read
+      # Required to post comments
+      pull-requests: write
+
+    env:
+      TF_ROOT: tf
+    
+    steps:
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v2
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+      
+      - name: Checkout base branch
+        uses: actions/checkout@v3
+        with:
+          ref: '${{ github.event.pull_request.base.ref }}'        
+
+      - name: Generate Infracost cost estimate baseline
+        run: |
+          infracost breakdown --path=${TF_ROOT} \
+                              --format=json \
+                              --out-file=/tmp/infracost-base.json
+          cat /tmp/infracost-base.json
