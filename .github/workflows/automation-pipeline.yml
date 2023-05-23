@@ -178,3 +178,4 @@ jobs:
           infracost breakdown --path=${TF_ROOT} \
                               --format=json \
                               --out-file=/tmp/infracost-base.json
+          cat /tmp/infracost-base.json
